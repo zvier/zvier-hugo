@@ -1,115 +1,28 @@
 ---
-title: "CNI 容器网络接口"
+title: "CNI容器网络接口"
 date: 2019-07-06T07:29:20+08:00
 draft: true
 categories: ["云原生"]
 tags: ["k8s", "docker"]
 ---
+# 简述
+k8s中，为了实现POD间通信，需要虚拟出一个网络通信平面，以及如何为POD规划IP。为此，k8s定义了一个容器网络接口规范(CNI, Container Network Interface)，也可以说是一个容器网络协议，它向下兼容所有符合规范的插件，当前网络插件的实现方案五花八门，主要有如下两大类:
+1. 路由方案： flannel-hostgw, calico, macvlan
+2. Overlay方案：常见的有flannel-overlay, openvswitch，weave，CNI-Genie from Huawei, Romanna等，如果不形成一个规范统一的标准，会造成模块之间大量的适配工作。
 
 # 什么是CNI
-k8s中，为了实现POD间通信，需要虚拟出一个网络通信平面，当前构建这个虚拟网络平面的方案五花八门，常见的有flannel，calico，openvswitch，weave，ipvlan等，如果不形成一个规范统一的标准，会造成模块之间大量的适配工作。
+作为连接容器管理系统和网络插件的接口，容器网络接口规范(CNI)约定了在容器创建或删除时的方法和参数等。任何满足这个规范的实现，都可以很好地支持上层容器编排系统的工作，k8s、mesos等可以直接通过调用这组约定的接口对容器网络进行操作和配置，而无需关注插件的实现细节。
 
-CNI(Container Network Interface)就是这样一个容器网络接口规范，或者说是一个容器网络协议，作为连接容器管理系统和网络插件的接口，它约定了在容器创建或删除时的方法和参数等。任何满足这个规范的实现，都可以很好地支持上层容器编排系统的工作，k8s、mesos等可以直接通过调用这组约定的接口对容器网络进行操作和配置，而无需关注插件的实现细节。
+CNI规范的基本思想就是在创建容器时，先创建好network namespace，然后调用CNI插件为这个netns配置网络，最后再启动容器内的进程。
 
-当然，CNI中还包含镜像相关的接口定义，因为镜像的生命周期和容器运行时彼此隔离，因此需要定义两个服务: RuntimeServiceServer和ImageServiceServer。
+# CNI插件
+CNI插件是任意满足CNI规范的一个实现，分为两个部分
+1. CNI Plugin
+CNI Plugin负责给容器配置网络，包含两个接口：配置网络、清理网络
+2. IPAM Plugin
+负责给容器分配IP，主要实现与两种：DHCP，host-local
 
-## RuntimeServiceServer
-{{< highlight go "linenos=inline" >}}
-k8s.io/cri-api/pkg/apis/runtime/v1alpha2/api.pb.go
-// Server API for RuntimeService service
-type RuntimeServiceServer interface {
-    // Version returns the runtime name, runtime version, and runtime API version.
-    Version(context.Context, *VersionRequest) (*VersionResponse, error)
-    // RunPodSandbox creates and starts a pod-level sandbox. Runtimes must ensure
-    // the sandbox is in the ready state on success.
-    RunPodSandbox(context.Context, *RunPodSandboxRequest) (*RunPodSandboxResponse, error)
-    // StopPodSandbox stops any running process that is part of the sandbox and
-    // reclaims network resources (e.g., IP addresses) allocated to the sandbox.
-    // If there are any running containers in the sandbox, they must be forcibly
-    // terminated.
-    // This call is idempotent, and must not return an error if all relevant
-    // resources have already been reclaimed. kubelet will call StopPodSandbox
-    // at least once before calling RemovePodSandbox. It will also attempt to
-    // reclaim resources eagerly, as soon as a sandbox is not needed. Hence,
-    // multiple StopPodSandbox calls are expected.
-    StopPodSandbox(context.Context, *StopPodSandboxRequest) (*StopPodSandboxResponse, error)
-    // RemovePodSandbox removes the sandbox. If there are any running containers
-    // in the sandbox, they must be forcibly terminated and removed.
-    // This call is idempotent, and must not return an error if the sandbox has
-    // already been removed.
-    RemovePodSandbox(context.Context, *RemovePodSandboxRequest) (*RemovePodSandboxResponse, error)
-    // PodSandboxStatus returns the status of the PodSandbox. If the PodSandbox is not
-    // present, returns an error.
-    PodSandboxStatus(context.Context, *PodSandboxStatusRequest) (*PodSandboxStatusResponse, error)
-    // ListPodSandbox returns a list of PodSandboxes.
-    ListPodSandbox(context.Context, *ListPodSandboxRequest) (*ListPodSandboxResponse, error)
-    // CreateContainer creates a new container in specified PodSandbox
-    CreateContainer(context.Context, *CreateContainerRequest) (*CreateContainerResponse, error)
-    // StartContainer starts the container.
-    StartContainer(context.Context, *StartContainerRequest) (*StartContainerResponse, error)
-    // StopContainer stops a running container with a grace period (i.e., timeout).
-    // This call is idempotent, and must not return an error if the container has
-    // already been stopped.
-    // TODO: what must the runtime do after the grace period is reached?
-    StopContainer(context.Context, *StopContainerRequest) (*StopContainerResponse, error)
-    // RemoveContainer removes the container. If the container is running, the
-    // container must be forcibly removed.
-    // This call is idempotent, and must not return an error if the container has
-    // already been removed.
-    RemoveContainer(context.Context, *RemoveContainerRequest) (*RemoveContainerResponse, error)
-    // ListContainers lists all containers by filters.
-    ListContainers(context.Context, *ListContainersRequest) (*ListContainersResponse, error)
-    // ContainerStatus returns status of the container. If the container is not
-    // present, returns an error.
-    ContainerStatus(context.Context, *ContainerStatusRequest) (*ContainerStatusResponse, error)
-    // UpdateContainerResources updates ContainerConfig of the container.
-    UpdateContainerResources(context.Context, *UpdateContainerResourcesRequest) (*UpdateContainerResourcesResponse, error)
-    // ReopenContainerLog asks runtime to reopen the stdout/stderr log file
-    // for the container. This is often called after the log file has been
-    // rotated. If the container is not running, container runtime can choose
-    // to either create a new log file and return nil, or return an error.
-    // Once it returns error, new container log file MUST NOT be created.
-    ReopenContainerLog(context.Context, *ReopenContainerLogRequest) (*ReopenContainerLogResponse, error)
-    // ExecSync runs a command in a container synchronously.
-    ExecSync(context.Context, *ExecSyncRequest) (*ExecSyncResponse, error)
-    // Exec prepares a streaming endpoint to execute a command in the container.
-    Exec(context.Context, *ExecRequest) (*ExecResponse, error)
-    // Attach prepares a streaming endpoint to attach to a running container.
-    Attach(context.Context, *AttachRequest) (*AttachResponse, error)
-    // PortForward prepares a streaming endpoint to forward ports from a PodSandbox.
-    PortForward(context.Context, *PortForwardRequest) (*PortForwardResponse, error)
-    // ContainerStats returns stats of the container. If the container does not
-    // exist, the call returns an error.
-    ContainerStats(context.Context, *ContainerStatsRequest) (*ContainerStatsResponse, error)
-    // ListContainerStats returns stats of all running containers.
-    ListContainerStats(context.Context, *ListContainerStatsRequest) (*ListContainerStatsResponse, error)
-    // UpdateRuntimeConfig updates the runtime configuration based on the given request.
-    UpdateRuntimeConfig(context.Context, *UpdateRuntimeConfigRequest) (*UpdateRuntimeConfigResponse, error)
-    // Status returns the status of the runtime.
-    Status(context.Context, *StatusRequest) (*StatusResponse, error)
- }
-{{< /highlight >}}
-
-## ImageServiceServer
-   35 // Server API for ImageService service
-   34
-   33 type ImageServiceServer interface {
-   32     // ListImages lists existing images.
-   31     ListImages(context.Context, *ListImagesRequest) (*ListImagesResponse, error)
-   30     // ImageStatus returns the status of the image. If the image is not
-   29     // present, returns a response with ImageStatusResponse.Image set to
-   28     // nil.
-   27     ImageStatus(context.Context, *ImageStatusRequest) (*ImageStatusResponse, error)
-   26     // PullImage pulls an image with authentication config.
-   25     PullImage(context.Context, *PullImageRequest) (*PullImageResponse, error)
-   24     // RemoveImage removes the image.
-   23     // This call is idempotent, and must not return an error if the image has
-   22     // already been removed.
-   21     RemoveImage(context.Context, *RemoveImageRequest) (*RemoveImageResponse, error)
-   20     // ImageFSInfo returns information of the filesystem that is used to store images.
-   19     ImageFsInfo(context.Context, *ImageFsInfoRequest) (*ImageFsInfoResponse, error)
-   18 }
-
+# k8s中的容器网络创建
 
 # CNI接口详解
 ## 接口定义
