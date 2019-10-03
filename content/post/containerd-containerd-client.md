@@ -1,68 +1,20 @@
 ---
-title: "content/post/containerd-containerd-client"
+title: "containerd-containerd-client"
 date: 2019-09-13T10:57:39+08:00
 draft: true
-categories: [""]
+categories: ["技术"]
 tags: ["containerd"]
 ---
 # 简述
+containerd的客户端实现，dockerd就是通过containerd的client与containerd交互  
 <!--more-->
 # 文件路径
 {{< highlight go "linenos=inline" >}}
-/home/liuzekun/go/src/github.com/containerd/containerd/client.go
+github.com/containerd/containerd/client.go
 {{< /highlight >}}
 
-package containerd
-
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"runtime"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-
-	containersapi "github.com/containerd/containerd/api/services/containers/v1"
-	contentapi "github.com/containerd/containerd/api/services/content/v1"
-	diffapi "github.com/containerd/containerd/api/services/diff/v1"
-	eventsapi "github.com/containerd/containerd/api/services/events/v1"
-	imagesapi "github.com/containerd/containerd/api/services/images/v1"
-	introspectionapi "github.com/containerd/containerd/api/services/introspection/v1"
-	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
-	namespacesapi "github.com/containerd/containerd/api/services/namespaces/v1"
-	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
-	"github.com/containerd/containerd/api/services/tasks/v1"
-	versionservice "github.com/containerd/containerd/api/services/version/v1"
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/content"
-	contentproxy "github.com/containerd/containerd/content/proxy"
-	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/events"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/leases"
-	leasesproxy "github.com/containerd/containerd/leases/proxy"
-	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/plugin"
-	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/snapshots"
-	snproxy "github.com/containerd/containerd/snapshots/proxy"
-	"github.com/gogo/protobuf/types"
-	ptypes "github.com/gogo/protobuf/types"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/pkg/errors"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health/grpc_health_v1"
-)
 # init
+将url注册到对应的类型
 {{< highlight go "linenos=inline" >}}
 import(
 	"github.com/containerd/typeurl"
@@ -80,6 +32,15 @@ func init() {
 }
 {{< /highlight >}}
 
+# New
+New函数会根据给定的地址和选项等生成一个已连接到containerd的客户端实例  
+{{< highlight go "linenos=inline" >}}
+import (
+    "github.com/containerd/containerd/defaults"
+    "github.com/containerd/containerd/platforms"
+)
+{{< /highlight >}}
+{{< highlight go "linenos=inline" >}}
 // New returns a new containerd client that is connected to the containerd
 // instance provided by address
 func New(address string, opts ...ClientOpt) (*Client, error) {
@@ -164,6 +125,12 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 
 	return c, nil
 }
+{{< /highlight >}}
+## 引用说明
+1. 回调函数: [ClientOpt](http://www.zvier.top/post/containerd-containerd-client_opts/#clientopt)
+2. 客户端选项: [clientOpts](http://www.zvier.top/post/containerd-containerd-client_opts/#clientopts)
+1. 默认运行时: [defaults.DefaultRuntime](http://www.zvier.top/post/containerd-containerd-defaults-defaults_unix/#%E5%B8%B8%E9%87%8F%E5%A3%B0%E6%98%8E) 
+3. 平台: [platforms.Default](http://www.zvier.top/post/containerd-containerd-platforms-defaults_unix/#default)
 
 // NewWithConn returns a new containerd client that is connected to the containerd
 // instance provided by the connection
@@ -195,6 +162,8 @@ func NewWithConn(conn *grpc.ClientConn, opts ...ClientOpt) (*Client, error) {
 	return c, nil
 }
 
+# Client
+{{< highlight go "linenos=inline" >}}
 // Client is the client to interact with containerd and its various services
 // using a uniform interface
 type Client struct {
@@ -206,6 +175,8 @@ type Client struct {
 	platform  platforms.MatchComparer
 	connector func() (*grpc.ClientConn, error)
 }
+{{< /highlight >}}
+
 
 // Reconnect re-establishes the GRPC connection to the containerd daemon
 func (c *Client) Reconnect() error {

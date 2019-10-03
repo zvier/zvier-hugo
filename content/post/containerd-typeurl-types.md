@@ -2,7 +2,7 @@
 title: "containerd-typeurl-type"
 date: 2019-09-13T11:20:18+08:00
 draft: true
-categories: [""]
+categories: ["技术"]
 tags: ["containerd"]
 ---
 # 简述
@@ -12,13 +12,6 @@ tags: ["containerd"]
 github.com/containerd/typeurl/typeurl.go
 {{< /highlight >}}
 
-package typeurl
-
-import (
-	"github.com/gogo/protobuf/proto"
-	"github.com/gogo/protobuf/types"
-	"github.com/pkg/errors"
-)
 # 变量
 {{< highlight go "linenos=inline" >}}
 var (
@@ -30,6 +23,7 @@ var ErrNotFound = errors.New("not found")
 {{< /highlight >}}
 
 # Register
+Register用于给URL注册一个类型，以便JSON编码，当调用MarshalAny或者UnmarshalAny函数时，这些URL就可视为一个Any类型来处理了。v表类型，args部分通过path.Join后，形成一个URL路径。  
 {{< highlight go "linenos=inline" >}}
 // Register a type with a base URL for JSON marshaling. When the MarshalAny and
 // UnmarshalAny functions are called they will treat the Any type value as JSON.
@@ -51,6 +45,47 @@ func Register(v interface{}, args ...string) {
 	registry[t] = p
 }
 {{< /highlight >}}
+以下是在[github.com/containerd/containerd/client.go](http://www.zvier.top/post/containerd-containerd-client/#init)中对Register函数的调用
+{{< highlight go "linenos=inline" >}}
+...
+typeurl.Register(&specs.Spec{}, prefix, "opencontainers/runtime-spec", major, "Spec")
+...
+{{< /highlight >}}
+再来看下两个相关的单元测试
+## 给URL注册类型
+{{< highlight go "linenos=inline" >}}
+go test -v types_test.go types.go -test.run TestRegisterPointerGetPointer
+{{< /highlight >}}
+{{< highlight go "linenos=inline" >}}
+func TestRegisterPointerGetPointer(t *testing.T) {
+    clear()
+    expected := "test"
+    Register(&test{}, "test")
+
+    url, err := TypeURL(&test{})
+    if err != nil {
+        t.Fatal(err)
+    }
+    if url != expected {
+        t.Fatalf("expected %q but received %q", expected, url)
+    }
+}
+{{< /highlight >}}
+也就是说当我们将URL路径<code>test</code>注册到一个<code>test</code>实例时，那TypeURL这个对象返回的就是该类型的URL，即<code>test</code>。
+## 注册不同的URL到同一个类型将panic
+{{< highlight go "linenos=inline" >}}
+func TestRegisterDiffUrls(t *testing.T) {
+    clear()
+    defer func() {
+        if err := recover(); err == nil {
+            t.Error("registering the same type with different urls should panic")
+        }
+    }()
+    Register(&test{}, "test")
+    Register(&test{}, "test", "two")
+}
+{{< /highlight >}}
+
 ## path.Join
 Join joins any number of path elements into a single path, adding a separating slash if necessary. The result is Cleaned; in particular, all empty strings are ignored.
 {{< highlight go "linenos=inline" >}}
@@ -59,6 +94,7 @@ func Join(elem ...string) string
 {{< /highlight >}}
 
 # TypeURL
+TypeURL用于返回被注册类型上注册的URL
 {{< highlight go "linenos=inline" >}}
 // TypeURL returns the type url for a registred type.
 func TypeURL(v interface{}) (string, error) {
@@ -78,6 +114,7 @@ func TypeURL(v interface{}) (string, error) {
 {{< /highlight >}}
 
 # Is
+Is用于判断types.Any实例和v上注册的TypeUrl是否相同
 {{< highlight go "linenos=inline" >}}
 // Is returns true if the type of the Any is the same as v.
 func Is(any *types.Any, v interface{}) bool {
@@ -90,7 +127,30 @@ func Is(any *types.Any, v interface{}) bool {
 	return any.TypeUrl == url
 }
 {{< /highlight >}}
+{{< highlight go "linenos=inline" >}}
+func TestIs(t *testing.T) {
+    clear()
+    Register(&test{}, "test")
 
+    v := &test{
+        Name: "koye",
+        Age:  6,
+    }
+    any, err := MarshalAny(v)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if !Is(any, &test{}) {
+        t.Fatal("Is(any, test{}) should be true")
+    }
+}
+{{< /highlight >}}
+可见，一个test实例通过MarshalAny编码后会生成一个Any结构的实例，该实例的TypeUrl和我们注册在test上的TypeUrl预期是一致的。  
+
+# MarshalAny
+MarshalAny用于将给定的v编码成一个具备TypeUrl值的types.Any结构，如果给定对象已经拥有proto.Any信息，那就直接将该信息完整返回，否则都需要编码处理一下。
+
+{{< highlight go "linenos=inline" >}}
 // MarshalAny marshals the value v into an any with the correct TypeUrl.
 // If the provided object is already a proto.Any message, then it will be
 // returned verbatim. If it is of type proto.Message, it will be marshaled as a
@@ -123,7 +183,42 @@ func MarshalAny(v interface{}) (*types.Any, error) {
 		Value:   data,
 	}, nil
 }
+{{< /highlight >}}
+看下单元测试，先是将URL路径test注册到了一个test实例，然后定义了一个test实例并调用MarshalAny编码生成一个Any对象，那这个对象的TypeUrl预期应该就是test，再次编码这个any对象，因为它已经属于types.Any类型，直接返回，所以预期应该相同。
+{{< highlight go "linenos=inline" >}}
+func TestMarshal(t *testing.T) {
+    clear()
+    expected := "test"
+    Register(&test{}, "test")
 
+    v := &test{
+        Name: "koye",
+        Age:  6,
+    }
+    any, err := MarshalAny(v)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if any.TypeUrl != expected {
+        t.Fatalf("expected %q but received %q", expected, any.TypeUrl)
+    }
+
+    // marshal it again and make sure we get the same thing back.
+    newany, err := MarshalAny(any)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    if newany != any { // you that right: we want the same *pointer*!
+        t.Fatalf("expected to get back same object: %v != %v", newany, any)
+    }
+
+}
+{{< /highlight >}}
+
+# UnmarshalAny
+给定一个types.Any类型对象，UnmarshalAny将其进行解码操作，返回本真  
+{{< highlight go "linenos=inline" >}}
 // UnmarshalAny unmarshals the any type into a concrete type.
 func UnmarshalAny(any *types.Any) (interface{}, error) {
 	return UnmarshalByTypeURL(any.TypeUrl, any.Value)
@@ -142,7 +237,41 @@ func UnmarshalByTypeURL(typeURL string, value []byte) (interface{}, error) {
 	}
 	return v, err
 }
+{{< /highlight >}}
+以下单元测试反应了将一个test实例编码，解码后，得到的结构仍然可以断言成test类型，信息原封不动  
+{{< highlight go "linenos=inline" >}}
+func TestMarshalUnmarshal(t *testing.T) {
+    clear()
+    Register(&test{}, "test")
 
+    v := &test{
+        Name: "koye",
+        Age:  6,
+    }
+    any, err := MarshalAny(v)
+    if err != nil {
+        t.Fatal(err)
+    }
+    nv, err := UnmarshalAny(any)
+    if err != nil {
+        t.Fatal(err)
+    }
+    td, ok := nv.(*test)
+    if !ok {
+        t.Fatal("expected value to cast to *test")
+    }
+    if td.Name != "koye" {
+        t.Fatal("invalid name")
+    }
+    if td.Age != 6 {
+        t.Fatal("invalid age")
+    }
+}
+{{< /highlight >}}
+
+# getTypeByUrl
+给定url，获取其类型  
+{{< highlight go "linenos=inline" >}}
 type urlType struct {
 	t       reflect.Type
 	isProto bool
@@ -167,6 +296,7 @@ func getTypeByUrl(url string) (urlType, error) {
 	}
 	return urlType{}, errors.Wrapf(ErrNotFound, "type with url %s", url)
 }
+{{< /highlight >}}
 
 # tryDereference
 解引用，检查并获取引用的元素类型

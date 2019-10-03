@@ -2,11 +2,11 @@
 title: "rpm spec"
 date: 2019-09-13T15:19:57+08:00
 draft: true
-categories: [""]
+categories: ["技术"]
 tags: ["linux"]
 ---
 # 简述
-如果软件项目中提供了spec文件，则可以将软件源码编译打包成rpm包，spec文件只是一个具有特殊语法的文本文件，文件中包含了很多软件包信息以及打包步骤。
+如果软件项目中提供了<code>.spec</code>文件，则可以通过rpmbuild将软件源码编译打包成rpm包，<code>.spec</code>文件中包含了很多软件包信息以及打包步骤，符合<code>.spec</code>的写作语法。
 
 <!--more-->
 打包命令为:
@@ -33,10 +33,28 @@ rpmbuild
 * SRPMS: rpmbuild创建的source RPM所存放的目录
 
 
-下面结合实例<code>k8s.io/kubernetes/build/rpms/kubelet.spec</code>，详解rpm spec文件的语法。  
+下面结合实例<code>k8s.io/kubernetes/build/rpms/kubelet.spec</code>, <code>docker-ce-packaging/rpm/SPECS/docker-ce.spec</code>, [kubernetes.spec](https://src.fedoraproject.org/rpms/kubernetes/blob/master/f/kubernetes.spec)等详解rpm spec文件的语法。  
 
 # 注释
 spec文件的注释以<code>#</code>开头，如果注释里有<code>%</code>，需要再附加一个<code>%</code>，比如: <code>%%prep</code>  
+
+# 定义全局变量(%global)
+通过%global可以定义一个全局变量，变量在使用前需要先进行定义，在定义时还可以嵌套引用其它变量:
+{{< highlight bash "linenos=inline" >}}
+%global name value
+{{< /highlight >}}
+{{< highlight bash "linenos=inline" >}}
+%global date 2012-02-08
+%global with_debug   0
+{{< /highlight >}}
+
+# 定义宏(%define)
+<code>%define</code>用来定义宏
+
+如果想取消某些操作，将这个操作设置为<code>%{nil}</code>，比如rpmbuild默认会生成debuginfo包，如果需要关闭，则可以如下设置:
+{{< highlight bash "linenos=inline" >}}
+%global debug_package %{nil}
+{{< /highlight >}}
 
 # spec文件头
 spec文件头主要包含rpm包的名字、版本、类别、说明摘要等信息  
@@ -188,11 +206,25 @@ PreReq: capability>=version
 Conflicts: bash>=2.0
 {{< /highlight >}}
 
+{{< highlight bash "linenos=inline" >}}
+# conflicting packages
+Conflicts: docker
+Conflicts: docker-io
+Conflicts: docker-engine-cs
+Conflicts: docker-ee
+{{< /highlight >}}
+
 ## Provides
 这个包能提供的功能  
 
-## Obsoletes(过时的)
-其他包提供的功能已经不推荐使用了，这通常是其他包的功能修改了，老版本不再推荐使用，可能在以后的版本中废弃   
+## Obsoletes(过时的，废弃的)
+列出被此软件包废弃使用的包，其它包提供的功能已经不推荐在此软件包中使用，通常是由于这些包的功能有了新的修改，可以废弃使用   
+{{< highlight bash "linenos=inline" >}}
+# Obsolete packages
+Obsoletes: docker-ce-selinux
+Obsoletes: docker-engine-selinux
+Obsoletes: docker-engine
+{{< /highlight >}}
 
 ## BuildRequires
 编译时的包依赖  
@@ -275,7 +307,7 @@ The node agent of Kubernetes, the container cluster manager.
 安装阶段定义了打包安装软件时将要执行的命令，类似make install，用于将已编译好的软件安装到Buildroot定义的虚拟目录结构中，从而打包形成一个rpm包。
 
 # 清理(%clean)
-为了防止由于Buildroot中的旧文件而导致错误的打包，必须在安装新文件之前将 Buildroot 中任何现有的文件删除，在制作了在 Install 段落中安装的文件的打包之后，将运行 %clean，保证下次构建之前 Buildroot 被清空。 
+为了防止由于Buildroot中的旧文件而导致错误的打包，必须在安装新文件之前将 Buildroot 中任何现有的文件删除，在制作了在 Install 段落中安装的文件的打包之后，将运行 %clean，保证下次构建之前 Buildroot 被清空。
 
 %clean
 {{< highlight bash "linenos=inline" >}}
@@ -283,12 +315,37 @@ rm -rf $RPM_BUILD_ROOT
 {{< /highlight >}}
 
 # 文件(%files)
-定义软件包所包含的文件，分为三类：说明文档（doc），配置文件（config）及执行程序，还可定义文件存取权限，拥有者及组别。
+定义软件包所包含的文件，分为三类：说明文档(doc)，配置文件(config)和可执行程序，在这里还可定义文件的存取权限，拥有者及组别等属性。
 
 这里也是在虚拟根目录下进行，不要写绝对路径，而应该用宏或变量表示相对路径。 如果描述为目录，表示目录中除%exclude外的所有文件。
 %defattr (-,root,root) 指定包装文件的属性，分别是(mode,owner,group)，-表示默认值，对文本文件是0644，可执行文件是0755
 
- 
+当定义一个子包时，必须至少包含Summary, Group, %description等选项，其它任何没有指定的选项将使用父包的选项，如版本等。
+{{< highlight bash "linenos=inline" >}}
+%package -n openstack-dashboard
+{{< /highlight >}}
+定义一个子包，子包的名称是openstack-dashboard
 
-# 更新日志(%changelog)
-每次软件的更新内容可以记录在这里，保存到发布的软件包中，以便查询之用。
+如果在%package中使用了-n选项，那么在使用%description时也要加上，如:
+{{< highlight bash "linenos=inline" >}}
+%package -n openstack-dashboard
+{{< /highlight >}}
+以及它的
+{{< highlight bash "linenos=inline" >}}
+%description -n openstack-dashboard
+{{< /highlight >}}
+如果在%package中使用了-n选项，那么在使用%files时也要加上，如:
+{{< highlight bash "linenos=inline" >}}
+%package -n openstack-dashboard
+{{< /highlight >}}
+以及它的
+{{< highlight bash "linenos=inline" >}}
+%files -n openstack-dashboard -f dashboard.lang
+{{< /highlight >}}
+
+# 修改日志(%changelog)
+修改日志，每次软件的更新内容可以记录在这里，保存到发布的软件包中，以便查询。日志条目的第一行是:
+{{< highlight bash "linenos=inline" >}}
+* 星期 月 日 年 修改人 邮箱
+{{< /highlight >}}
+其中星期、月份采用英文形式的前3个字母，接下来写修改的内容，支持多行，没行以<code>-</code>开头  
