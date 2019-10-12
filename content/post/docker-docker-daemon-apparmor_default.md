@@ -3,7 +3,7 @@ title: "docker-docker-daemon-apparmor_default"
 date: 2019-09-28T07:08:43+08:00
 draft: true
 categories: ["技术"]
-tags: ["dockerd"]
+tags: ["docker"]
 ---
 # 简述
 apparmor和selinux一样，都可以提供访问控制机制，保障应用程序的安全运行。armor意为盔甲、装甲，言外之意就是为操作系统和应用程序提供保护免受安全威胁。

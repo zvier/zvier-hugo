@@ -5,8 +5,9 @@ draft: true
 categories: ["技术"]
 tags: ["docker"]
 ---
-# 简述
+> 如花美眷，似水流年——汤显祖«牡丹亭»
 <!--more-->
+
 # 文件路径
 {{< highlight go "linenos=inline" >}}
 github.com/docker/docker/api/server/server.go
@@ -41,14 +42,13 @@ type Config struct {
 {{< /highlight >}}
 
 # Server
-Server信息
+Server包含api服务端的信息
 {{< highlight go "linenos=inline" >}}
 import (
     ""github.com/docker/docker/api/server/middleware""
     "github.com/docker/docker/api/server/router"
 )
 {{< /highlight >}}
-
 {{< highlight go "linenos=inline" >}}
 // Server contains instance details for the server
 type Server struct {
@@ -59,6 +59,11 @@ type Server struct {
 	middlewares   []middleware.Middleware
 }
 {{< /highlight >}}
+其中，cfg为api server的配置信息   
+servers为httpServer结构体对象，包括http.Server和net.Listener监听器   
+router.Router路由表对象Route,包括Handler，Method, Path  
+routerSwapper为路由交换器对象，使用新的路由交换旧的路由器   
+middleware.Middleware为中间件  
 
 # New
 New根据配置返回一个server实例
@@ -87,6 +92,8 @@ func (s *Server) UseMiddleware(m middleware.Middleware) {
 }
 {{< /highlight >}}
 
+# Server.Accept
+{{< highlight go "linenos=inline" >}}
 // Accept sets a listener the server accepts connections into.
 func (s *Server) Accept(addr string, listeners ...net.Listener) {
 	for _, listener := range listeners {
@@ -99,7 +106,10 @@ func (s *Server) Accept(addr string, listeners ...net.Listener) {
 		s.servers = append(s.servers, httpServer)
 	}
 }
+{{< /highlight >}}
 
+# Servier.Close
+{{< highlight go "linenos=inline" >}}
 // Close closes servers and thus stop receiving requests
 func (s *Server) Close() {
 	for _, srv := range s.servers {
@@ -108,7 +118,10 @@ func (s *Server) Close() {
 		}
 	}
 }
+{{< /highlight >}}
 
+# Servier.serveAPI
+{{< highlight go "linenos=inline" >}}
 // serveAPI loops through all initialized servers and spawns goroutine
 // with Serve method for each. It sets createMux() as Handler also.
 func (s *Server) serveAPI() error {
@@ -133,7 +146,10 @@ func (s *Server) serveAPI() error {
 	}
 	return nil
 }
+{{< /highlight >}}
 
+# HTTPServer
+{{< highlight go "linenos=inline" >}}
 // HTTPServer contains an instance of http server and the listener.
 // srv *http.Server, contains configuration to create an http server and a mux router with all api end points.
 // l   net.Listener, is a TCP or Socket listener that dispatches incoming request to the router.
@@ -141,17 +157,27 @@ type HTTPServer struct {
 	srv *http.Server
 	l   net.Listener
 }
+{{< /highlight >}}
 
+
+# HTTPServer.Serve
+{{< highlight go "linenos=inline" >}}
 // Serve starts listening for inbound requests.
 func (s *HTTPServer) Serve() error {
 	return s.srv.Serve(s.l)
 }
+{{< /highlight >}}
 
+# HTTPServer.Close
+{{< highlight go "linenos=inline" >}}
 // Close closes the HTTPServer from listening for the inbound requests.
 func (s *HTTPServer) Close() error {
 	return s.l.Close()
 }
+{{< /highlight >}}
 
+# Server.makeHTTPHandler
+{{< highlight go "linenos=inline" >}}
 func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Define the context that we'll pass around to share info
@@ -182,7 +208,10 @@ func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 		}
 	}
 }
+{{< /highlight >}}
 
+# Server.InitRouter
+{{< highlight go "linenos=inline" >}}
 // InitRouter initializes the list of routers for the server.
 // This method also enables the Go profiler.
 func (s *Server) InitRouter(routers ...router.Router) {
@@ -193,15 +222,28 @@ func (s *Server) InitRouter(routers ...router.Router) {
 		router: m,
 	}
 }
+{{< /highlight >}}
 
+# pageNotFoundError
+{{< highlight go "linenos=inline" >}}
 type pageNotFoundError struct{}
+{{< /highlight >}}
 
+# pageNotFoundError.Error
+{{< highlight go "linenos=inline" >}}
 func (pageNotFoundError) Error() string {
 	return "page not found"
 }
+{{< /highlight >}}
 
+# pageNotFoundError.NotFound
+{{< highlight go "linenos=inline" >}}
 func (pageNotFoundError) NotFound() {}
+{{< /highlight >}}
 
+# Server.createMux
+Server.createMux初始化一个server断的路由器
+{{< highlight go "linenos=inline" >}}
 // createMux initializes the main router the server uses.
 func (s *Server) createMux() *mux.Router {
 	m := mux.NewRouter()
@@ -231,7 +273,15 @@ func (s *Server) createMux() *mux.Router {
 
 	return m
 }
+{{< /highlight >}}
 
+## 饮用说明
+1. 路由器: mux.Router
+1. 创建路由器: mux.NewRouter
+
+# Server.Wait
+调用Server.Wait将阻塞直至协程退出，如果API的执行出错，将通过waitChan通道返回相应的错误信息
+{{< highlight go "linenos=inline" >}}
 // Wait blocks the server goroutine until it exits.
 // It sends an error message if there is any error during
 // the API execution.
@@ -243,4 +293,4 @@ func (s *Server) Wait(waitChan chan error) {
 	}
 	waitChan <- nil
 }
-
+{{< /highlight >}}
