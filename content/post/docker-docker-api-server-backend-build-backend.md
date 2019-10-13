@@ -14,7 +14,6 @@ tags: ["docker"]
 {{< highlight go "linenos=inline" >}}
 github.com/docker/docker/api/server/backend/build/backend.go
 {{< /highlight >}}
-package build // import "github.com/docker/docker/api/server/backend/build"
 
 import (
 	"github.com/docker/docker/api/types"
@@ -33,7 +32,7 @@ import (
 import	"github.com/docker/distribution/reference"
 {{< /highlight >}}
 
-ImageComponent是一个interface，定义了镜像相关的操作接口   
+ImageComponent定义了一组镜像相关的操作接口   
 {{< highlight go "linenos=inline" >}}
 // ImageComponent provides an interface for working with images
 type ImageComponent interface {
@@ -43,7 +42,7 @@ type ImageComponent interface {
 {{< /highlight >}}
 
 # Builder
-Builder也是一个interface，定义了build相关的操作接口
+Builder也是一个interface，定义了build相关的操作方法  
 {{< highlight go "linenos=inline" >}}
 import	"github.com/docker/docker/api/types/backend"
 {{< /highlight >}}
