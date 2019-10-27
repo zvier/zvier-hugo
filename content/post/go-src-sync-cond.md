@@ -21,6 +21,11 @@ import (
 	"unsafe"
 )
 
+# Cond
+Cond实现了一个条件变量，它是一个线程集合地(rendezvous point, 约会地点；集结地)，供线程等待或者宣布某事件的发生。  
+
+每个Cond实例都有关联到锁L（一般是*Mutex或*RWMutex类型的值），它必须在改变条件时或者调用Wait方法时保持锁定。Cond禁拷贝。
+{{< highlight go "linenos=inline" >}}
 // Cond implements a condition variable, a rendezvous point
 // for goroutines waiting for or announcing the occurrence
 // of an event.
@@ -39,11 +44,15 @@ type Cond struct {
 	notify  notifyList
 	checker copyChecker
 }
+{{< /highlight >}}
 
+# NewCond
+{{< highlight go "linenos=inline" >}}
 // NewCond returns a new Cond with Locker l.
 func NewCond(l Locker) *Cond {
 	return &Cond{L: l}
 }
+{{< /highlight >}}
 
 // Wait atomically unlocks c.L and suspends execution
 // of the calling goroutine. After later resuming execution,
