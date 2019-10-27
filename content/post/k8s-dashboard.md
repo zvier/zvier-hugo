@@ -37,6 +37,7 @@ type: Opaque
 ---
 {{< /highlight >}}
 ## Dashboard Service Account
+该部分定义了Dashboard的用户，类型为Service Account，名称为kubernetes-dashboard
 {{< highlight bash "linenos=inline" >}}
 # ------------------- Dashboard Service Account ------------------- #
 
@@ -52,6 +53,7 @@ metadata:
 {{< /highlight >}}
 
 # Dashboard Role & Role Binding
+该部分定义了Dashboard将使用的角色kubernetes-dashboard-minimal，rules中列出了角色所拥有的多个权限。总体来看，级别还是比较低的。接着又定义了一个Role Binding，将roleRef指定的角色kubernetes-dashboard-minimal与subjects指定的主体kubernetes-dashboard绑定。
 {{< highlight bash "linenos=inline" >}}
 # ------------------- Dashboard Role & Role Binding ------------------- #
 
@@ -167,6 +169,8 @@ spec:
 
 ---
 {{< /highlight >}}
+可以看到，Dashboard的Deployment指定了其使用的ServiceAccount是kubernetes-dashboard。并且还将Secret kubernetes-dashboard-certs通过volumes挂在到pod内部的/certs路径。为何要挂载Secret ？原因是创建Secret 时会自动生成token。请注意参数--auto-generate-certificates，其表示Dashboard会自动生成证书。
+
 ## Dashboard Service
 {{< highlight bash "linenos=inline" >}}
 # ------------------- Dashboard Service ------------------- #
@@ -222,7 +226,21 @@ kubectl get pods -n kube-system | grep 'kubernetes-dashboard'
 TLS 的作用就是对通讯加密，防止中间人窃听；同时如果证书不信任的话根本就无法与 apiserver 建立连接，更不用提有没有权限向 apiserver 请求指定内容。
 
 # 授予dashboard账户集群管理权限
-k8s中的RBAC规定了一个用户或者用户组具有请求哪些api的权限，在配合TLS加密使用的时候，客户端如果想要与apiserver通讯，就必须采用由apiserver CA签发的证书，形成信任关系，建立TLS连接。apiserver通过读取客户端证书的CN字段作为RBAC的用户名，读取O字段作为RBAC的用户组，进而访问服务。
+使用kubeadm搭建k8s集群会默认开启RABC(角色访问控制机制)，k8s中的RBAC规定了一个用户或者用户组具有请求哪些api的权限。以下先了解几个基本概念:
+
+## 用户
+关于k8s的用户有两种: User和Service Account，User分配给管理员，Service Account分配给进程，这里的Dashboard就是一个进程，可以为其创建一个Service Account。
+
+## 角色
+角色Role是一系列权限的集合，例如一个Role可包含读取和列出Pod的权限，ClusterRole和Role 类似，其权限范围是整个集群。
+
+## 角色绑定
+RoleBinding把角色关联或映射到用户，即将角色和用户绑定，让用户拥有该角色设定的权限，同理ClusterRoleBinding和RoleBinding类似，可让用户拥有ClusterRole的权限。
+
+## Secret
+Secret是一个包含少量敏感信息如密码，令牌，或秘钥的对象。把这些信息保存在 Secret对象中，可以在这些信息被使用时加以控制，并可以降低信息泄露的风险。
+
+在配合TLS加密使用的时候，客户端如果想要与apiserver通讯，就必须采用由apiserver CA签发的证书，形成信任关系，建立TLS连接。apiserver通过读取客户端证书的CN字段作为RBAC的用户名，读取O字段作为RBAC的用户组，进而访问服务。
 
 以下通过编写配置文件kubernetes-dashboard-admin-rbac.yaml，分别创建账户以及为账户分配权限
 
@@ -266,7 +284,7 @@ kubectl create clusterrolebinding kubernetes-dashboard-admin --clusterrole=clust
 {{< /highlight >}}
 
 # 登陆
-## 使用token登陆
+## 使用管理员角色登陆
 * 获取账户kubernetes-dashboard-admin的secret
 {{< highlight go "linenos=inline" >}}
 kubectl -n kube-system get secret | grep kubernetes-dashboard-admin
@@ -276,7 +294,51 @@ kubectl -n kube-system get secret | grep kubernetes-dashboard-admin
 kubectl describe secrets $secret -n kube-system | grep token
 {{< /highlight >}}
 
+Dashboard访问方式有4种: NodePort，API Server，kubectl proxy，Ingress
+## 使用NodePort
+使用NodePort时，需要配置好一个私有证书或者使用共有证书，否则会提示证书错误NET::ERR_CERT_INVALID
+1. 查看kubernetes-dashboard 容器所在节点
+{{< highlight go "linenos=inline" >}}
+kubectl get pod -n kube-system -o wide | grep 'kubernetes-dashboard'
+{{< /highlight >}}
+2. 在节点上查看kubernetes-dashboard容器ID
+{{< highlight go "linenos=inline" >}}
+docker ps | grep dashboard
+{{< /highlight >}}
+3. 获取kubernetes-dashboard容器certs所挂载的宿主主机目录
+{{< highlight go "linenos=inline" >}}
+docker inspect -f {{.Mounts}} 384d9dc0170b
+{{< /highlight >}}
+4. 以私有证书配置，生成dashboard证书
+{{< highlight go "linenos=inline" >}}
+openssl genrsa -des3 -passout pass:x -out dashboard.pass.key 2048
+openssl rsa -passin pass:x -in dashboard.pass.key -out dashboard.key
+openssl req -new -key dashboard.key -out dashboard.csr
+openssl x509 -req -sha256 -days 365 -in dashboard.csr -signkey dashboard.key -out dashboard.crt
+{{< /highlight >}}
+5. 将生成的dashboard.crt  dashboard.key放到certs对应的宿主主机souce目录
+{{< highlight go "linenos=inline" >}}
+scp dashboard.crt dashboard.key 192.168.20.214:/var/lib/kubelet/pods/94c8c50b-f484-11e8-80e8-000c29c3dca5/volumes/kubernetes.io~secret/kubernetes-dashboard-certs
+{{< /highlight >}}
+6. 重启kubernetes-dashboard容器
+{{< highlight go "linenos=inline" >}}
+docker restart 384d9dc0170b
+{{< /highlight >}}
 
+## 使用API Server
+https://192.168.20.210:6443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/
+返回403
+原因:
+由于kube-apiserver使用了TLS认证，而我们的真实物理机上的浏览器使用匿名证书（因为没有可用的证书）去访问Dashboard，导致授权失败而不无法访问
+
+## 使用kubectl proxy
+Master上执行nohup kubecll proxy &，然后使用如下地址访问Dashboard
+http://localhost:8001/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy
+限制就是必须在Master上访问，在主节点上，我们执行nohup kubectl proxy --address=192.168.20.210 --disable-filter=true & 开启代理
+address表示外界可以使用192.168.20.210来访问Dashboard，我们也可以使用0.0.0.0
+disable-filter=true表示禁用请求过滤功能，否则我们的请求会被拒绝，并提示 Forbidden (403) Unauthorized
+也可以指定端口，具体请查看kubectl proxy --help
+proxy默认对Master的8001端口进行监听
 # 问题
 直接实用HTTPS方式请求，浏览器会报错并提示“NET::ERR_CERT_INVALID”
 ## 方式一: 换火狐浏览器
@@ -337,3 +399,21 @@ kubectl apply -f dashboard-admin.yaml
 {{< highlight go "linenos=inline" >}}
 {{< /highlight >}}
 
+# 权限不够
+kubernetes-dashboard-minimal，Role的权限不够，
+更改RoleBinding修改为ClusterRoleBinding，并且修改roleRef中的kind和name，使用cluster-admin这个非常牛逼的CusterRole（超级用户权限，其拥有访问kube-apiserver的所有权限）。如下：
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard-minimal
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-dashboard
+  namespace: kube-system
+修改后，重新创建kubernetes-dashboard.yaml，Dashboard就可以拥有访问整个K8S 集群API的权限。我们重新访问Dashboard
