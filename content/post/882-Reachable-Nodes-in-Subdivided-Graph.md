@@ -1,5 +1,5 @@
 ---
-title: "882.Reachable-Nodes-in-Subdivided-Graph"
+title: "882 Reachable Nodes in Subdivided Graph"
 date: 2019-10-19T15:56:52+08:00
 draft: true
 categories: ["技术"]

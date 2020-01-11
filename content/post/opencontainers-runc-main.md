@@ -166,7 +166,7 @@ func main() {
 {{< /highlight >}}
 
 ## 引用
-1. 日志配置: [logs.ConfigureLogging](xx)
+1. 日志配置: [logs.ConfigureLogging](http://www.zvier.top/post/opencontainers-runc-libcontainer-logs/#config)
 
 
 # FatalWriter

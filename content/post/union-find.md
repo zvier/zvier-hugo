@@ -43,14 +43,14 @@ Sk，初始化时可划分为n个子集，每个子集包含S中的一个不同�
 quick-find算法认为当前仅当id[p]==id[q]时，p和q连通。union(p,
 q)调用会先检查p和q是否已经连通，如果连通则return，否则我们需要将p所在连通分量和q所在的连通分量合并，即要将两个集合中所有元素的id值统一
 
-## find
+### find
 {{< highlight go "linenos=inline" >}}
 func find(id []int, p) {
     return id[p]
 }
 {{< /highlight >}}
 
-## union
+### union
 {{< highlight go "linenos=inline" >}}
 func union(id *[]int, p, q int) {
     pid := find(*id, p)
@@ -63,5 +63,26 @@ func union(id *[]int, p, q int) {
             (*id)[i] = pid
         }
     }
+}
+{{< /highlight >}}
+
+## quick-union算法
+与quick-find相对应的是quick-union算法，自然quick-union算法的快体现在以牺牲find为代价加速union。同样，quick-union算法也基于以触点为索引的id数组，不过id数组元素的含义不再是对应触点的分量名，而是触点同分量中的另一个触点或它自己，从而形成一系列链接。  
+
+### find
+find时，我们可以从给定触点开始，由链接得到另外一个触点，并依此继续得到下一个触点，最终抵达根触点，根触点就是触点链接到自己的触点，那判断两个触点是否在同一连通分量，当前仅当由这个两个触点出发，能到达同一根触点。
+
+
+### union
+为了保证上述find逻辑，union(p,
+q)的实现可以这样，分别找到p，q的根触点，将两个根触点链接，即实现了另一个分量的重命名，简单高效。
+{{< highlight go "linenos=inline" >}}
+func union(id *[]int, p, q int) {
+    pRoot := find(*id, p)
+    qRoot := find(*id, q)
+    if(pRoot == qRoot) {
+        return
+    }
+    (*id)[pRoot] = (*id)[qRoot]
 }
 {{< /highlight >}}
