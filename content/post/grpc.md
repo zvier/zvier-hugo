@@ -12,3 +12,12 @@ tags: ["grpc"]
 {{< highlight go "linenos=inline" >}}
 {{< /highlight >}}
 
+# ServerOption
+{{< highlight go "linenos=inline" >}}
+// import "google.golang.org/grpc"
+type ServerOption interface {
+    // contains filtered or unexported methods
+}
+
+A ServerOption sets options such as credentials(证书；文凭，认证信息), codec(编解码器) and keepalive parameters, etc.
+{{< /highlight >}}
