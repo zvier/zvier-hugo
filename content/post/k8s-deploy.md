@@ -149,16 +149,23 @@ yum install -y kubectl-1.17.0-0
 systemctl enable kubelet && systemctl start kubelet
 {{< /highlight >}}
 
+# 跨VPC部署
+如果是跨VPC部署，由于node在加入集群时，被登记的网卡ip很可能是内网ip，这时master节点和node节点通信就存在问题，再个人部署时，可以使用iptables做NAT转发
+{{< highlight go >}}
+iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+iptables -t nat -A OUTPUT -p all -d ${internal-ip} -j DNAT --to-destination ${public-ip}
+{{< /highlight >}}
+
 # 部署master节点
 ## master节点初始化
 这里执行初始化用到了--image-repository选项，指定初始化时从阿里云镜像仓库拉取所需要的镜像
 {{< highlight go >}}
 kubeadm init \
-    --apiserver-advertise-address=172.16.124.229 \
+    --apiserver-advertise-address=${public-ip} \
     --image-repository registry.aliyuncs.com/google_containers \
-    --kubernetes-version v1.17.0 \
+    --kubernetes-version v1.17.3 \
     --pod-network-cidr=10.244.0.0/16 \
-    --ignore-preflight-errors=NumCPU,Swap
+    // --ignore-preflight-errors=NumCPU,Swap
 {{< /highlight >}}
 
 ## 参数说明
@@ -202,6 +209,34 @@ kubeadm init \
 9. 提示如何安装pod网络。
 10. 提示如何注册其他节点到cluster。
 
+以上步骤也可以通过配置方式完成:
+{{< highlight bash >}}
+kubeadm init --config kubeadm.yaml
+{{< /highlight >}}
+其中kubeadm.yaml文件的生产可以通过如下命令生产:
+{{< highlight bash >}}
+kubeadm config print init-defaults
+{{< /highlight >}}
+
+然后根据实际情况调整部分参数
+{{< highlight bash >}}
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+imageRepository: registry.cn-hangzhou.aliyuncs.com/google_containers
+controlPlaneEndpoint: ${public-ip}:6443
+clusterName: kubernetes
+apiServer:
+  certSANS:
+  - ${public-ip}
+  extraArgs:
+    authorization-mode: Node,RBAC
+    advertise-address: ${public-ip}
+networking:
+  dnsDomain: cluster.local
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+{{< /highlight >}}
+
 # master配置
 master初始化完后会提示如下信息:
 {{< highlight go >}}
@@ -226,7 +261,7 @@ Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
 {{< highlight go >}}
 Then you can join any number of worker nodes by running the following on each as root:
 
-kubeadm join 172.16.124.229:6443 --token u2pv3g.sodo7rgsfoqc7s5u \
+kubeadm join ${ip}:6443 --token u2pv3g.sodo7rgsfoqc7s5u \
     --discovery-token-ca-cert-hash sha256:d65fc098e3ae98bc02ee670d0c8bfb266bbfe24d6433604b00f189f4797ae96b
 {{< /highlight >}}
 如果token忘记，可以执行如下命令获取
@@ -340,6 +375,10 @@ spec:
 查看相关pod状态，确保所有pod处于Running状态
 {{< highlight go >}}
 kubectl get pod --all-namespaces -o wide
+{{< /highlight >}}
+注意，如果是公有云主机部署，flannel默认走内网ip，需要修正
+{{< highlight go >}}
+kubectl annotate node hd1 --overwrite flannel.alpha.coreos.com/public-ip=${public_ip}
 {{< /highlight >}}
 
 # taint master

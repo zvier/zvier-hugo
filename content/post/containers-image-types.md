@@ -44,17 +44,38 @@ type ImageTransport interface {
 	ValidatePolicyConfigurationScope(scope string) error
 }
 {{< /highlight >}}
-可见，对于一个ImageTransport实例而言，它必须实现如下几个方法:
 
-1. 提供Name方法，返回ImageTransport的名字
+## 举例
+以下结合docker-daemon
+ImageTransport为例，体检下ImageTransport的实现和使用。docker-daemon
+ImageTransport的实现在github.com/containers/image/docker/daemon下，其实例以可导出全局变量注册在transports中
+{{< highlight go "linenos=inline" >}}
+// github.com/containers/image/docker/daemon/daemon_transport.go
+var Transport = daemonTransport{}
+{{< /highlight >}}
+
+其实现的方法有:  
+1.提供Name方法，返回ImageTransport的名字
 {{< highlight go >}}
 Name() string
 {{< /highlight >}}
 
-2. 提供ParseReference方法，从一个字符串中解析出一个ImageReference.
+2.提供ParseReference方法，从一个字符串中解析出一个ImageReference.
 {{< highlight go >}}
 ParseReference(reference string) (ImageReference, error)
 {{< /highlight >}}
+
+示例:
+{{< highlight go >}}
+func main() {
+    t := daemon.Transport
+    imageRef, _ := t.ParseReference("busybox:latest")
+    fmt.Printf("imageRef: %+v\n", imageRef)
+}
+
+imageRef: {id: ref:{namedRepository:{domain:docker.io path:library/busybox} tag:latest}}
+{{< /highlight >}}
+
 
 # ImageReference
 ImageReference是对镜像位置进行引用方式的一种抽象，与ImageTransport名字空间相关联。ImageReference对象一旦创建后，就是不可变的。
@@ -116,30 +137,79 @@ type ImageReference interface {
 }
 {{< /highlight >}}
 
-ImageReference实现需要实现以下方法:  
+ImageReference接口约定了如下方法:  
 
-1. 提供Transport，返回该ImageReference对象的ImageTransport，从这里可知，当ImageReference确定了之后，它的ImageTransport也就确定了
+1.提供Transport，返回该ImageReference对象的ImageTransport，从这里可知，当ImageReference确定了之后，它的ImageTransport也就确定了
 {{< highlight go >}}
 Transport() ImageTransport
 {{< /highlight >}}
+{{< highlight go >}}
+transport := imageRef.Transport()
+fmt.Printf("transport: %+v\n", transport)
 
-2. 提供StringWithinTransport，返回ImageReference对象的字符串表示，通过调用reference.Transport().ParseReference，从该字符串逆向可解析到等效的ImageReference，但值得注意的是该字符串和原始的字符串表示不一定是相等的。
+transport: {}
+{{< /highlight >}}
+
+
+
+2.提供StringWithinTransport，返回ImageReference对象的字符串表示，通过调用reference.Transport().ParseReference，从该字符串逆向可解析到等效的ImageReference，但值得注意的是该字符串和原始的字符串表示不一定是相等的。
 {{< highlight go >}}
 StringWithinTransport() string
 {{< /highlight >}}
 
-3. 提供DockerReference，可以返回该ImageReference所关联的DockerReference，如果不适配DockerReference，返回nil
+{{< highlight go >}}
+strWithTran := imageRef.StringWithinTransport()
+fmt.Printf("strWithTran: %+v\n", strWithTran)
+
+strWithTran: busybox:latest
+{{< /highlight >}}
+
+3.提供DockerReference，可以返回该ImageReference所关联的DockerReference，如果不适配DockerReference，返回nil
 {{< highlight go >}}
 DockerReference() reference.Named
 {{< /highlight >}}
 
-4. 提供PolicyConfigurationIdentity，返回ImageReference实例所的字符串表示，适合于policy查询。可以和StringWithinTransport()等效但是不能保证，所以从该结果也不一定能逆向解析出相应的ImageReference，因为如果该ImageReference不支持配置认证的化，它会返回一个空字符串
+{{< highlight go >}}
+dockerRef := imageRef.DockerReference()
+fmt.Printf("dockerRef: %+v\n", dockerRef)
+
+dockerRef: docker.io/library/busybox:latest
+{{< /highlight >}}
+
+4.提供PolicyConfigurationIdentity，返回ImageReference实例所的字符串表示，适合于policy查询。可以和StringWithinTransport()等效但是不能保证，所以从该结果也不一定能逆向解析出相应的ImageReference，因为如果该ImageReference不支持配置认证的化，它会返回一个空字符串
 {{< highlight go >}}
 PolicyConfigurationIdentity() string
 {{< /highlight >}}
 
-5. 
+{{< highlight go >}}
+policyCfgIty := imageRef.PolicyConfigurationIdentity()
+fmt.Printf("policyCfgIty: %+v\n", policyCfgIty)
 
+policyCfgIty: docker.io/library/busybox:latest
+{{< /highlight >}}
+
+5.提供NewImage，基于ImageReference实例生产它的types.ImageCloser
+{{< highlight go >}}
+NewImage(ctx context.Context, sys *SystemContext) (ImageCloser, error)
+{{< /highlight >}}
+
+6.提供NewImageSource，基于ImageReference实例生产它的types.ImageSource
+{{< highlight go >}}
+NewImageSource(ctx context.Context, sys *SystemContext) (ImageSource, error)
+{{< /highlight >}}
+
+7.提供NewImageDestination，基于ImageReference实例生产它的types.ImageDestination
+{{< highlight go >}}
+NewImageDestination(ctx context.Context, sys *SystemContext) (ImageDestination, error)
+{{< /highlight >}}
+
+8.提供DeleteImage，从registry中删除镜像
+{{< highlight go >}}
+DeleteImage(ctx context.Context, sys *SystemContext) error
+{{< /highlight >}}
+
+# 镜像压缩相关的类型与常量
+{{< highlight go "linenos=inline" >}}
 // LayerCompression indicates if layers must be compressed, decompressed or preserved
 type LayerCompression int
 
@@ -152,7 +222,10 @@ const (
 	// Compress indicates the layer must be compressed
 	Compress
 )
+{{< /highlight >}}
 
+# 镜像加密相关的类型与常量
+{{< highlight go "linenos=inline" >}}
 // LayerCrypto indicates if layers have been encrypted or decrypted or none
 type LayerCrypto int
 
@@ -165,7 +238,11 @@ const (
 	// Decrypt indicates the layer is decrypted
 	Decrypt
 )
+{{< /highlight >}}
 
+# BlobInfo
+BlobInfo用于描述一个blob
+{{< highlight go "linenos=inline" >}}
 // BlobInfo collects known information about a blob (layer/config).
 // In some situations, some fields may be unknown, in others they may be mandatory; documenting an “unknown” value here does not override that.
 type BlobInfo struct {
@@ -190,7 +267,10 @@ type BlobInfo struct {
 	// remove field out out of BlobInfo.
 	CryptoOperation LayerCrypto
 }
+{{< /highlight >}}
 
+# BICTransportScope
+{{< highlight go "linenos=inline" >}}
 // BICTransportScope encapsulates transport-dependent representation of a “scope” where blobs are or are not present.
 // BlobInfocache.RecordKnownLocations / BlobInfocache.CandidateLocations record data aboud blobs keyed by (scope, digest).
 // The scope will typically be similar to an ImageReference, or a superset of it within which blobs are reusable.
@@ -201,7 +281,10 @@ type BlobInfo struct {
 type BICTransportScope struct {
 	Opaque string
 }
+{{< /highlight >}}
 
+# BICLocationReference
+{{< highlight go "linenos=inline" >}}
 // BICLocationReference encapsulates transport-dependent representation of a blob location within a BICTransportScope.
 // Each transport can store arbitrary data using BlobInfoCache.RecordKnownLocation, and ImageDestination.TryReusingBlob
 // can look it up using BlobInfoCache.CandidateLocations.
@@ -212,13 +295,19 @@ type BICTransportScope struct {
 type BICLocationReference struct {
 	Opaque string
 }
+{{< /highlight >}}
 
+# BICReplacementCandidate
+{{< highlight go "linenos=inline" >}}
 // BICReplacementCandidate is an item returned by BlobInfoCache.CandidateLocations.
 type BICReplacementCandidate struct {
 	Digest   digest.Digest
 	Location BICLocationReference
 }
+{{< /highlight >}}
 
+# BlobInfoCache
+{{< highlight go "linenos=inline" >}}
 // BlobInfoCache records data useful for reusing blobs, or substituing equivalent ones, to avoid unnecessary blob copies.
 //
 // It records two kinds of data:
@@ -266,7 +355,11 @@ type BlobInfoCache interface {
 	// uncompressed digest.
 	CandidateLocations(transport ImageTransport, scope BICTransportScope, digest digest.Digest, canSubstitute bool) []BICReplacementCandidate
 }
+{{< /highlight >}}
 
+# ImageSource
+ImageSource是一个服务，这个服务也有可能是远端的，可用于下载当个镜像的组件或者镜像集合，主要可用于镜像拷贝，如果是为了查看镜像的属性，Image将更合适
+{{< highlight go "linenos=inline" >}}
 // ImageSource is a service, possibly remote (= slow), to download components of a single image or a named image set (manifest list).
 // This is primarily useful for copying images around; for examining their properties, Image (below)
 // is usually more useful.
@@ -306,7 +399,38 @@ type ImageSource interface {
 	// WARNING: The list may contain duplicates, and they are semantically relevant.
 	LayerInfosForCopy(ctx context.Context, instanceDigest *digest.Digest) ([]BlobInfo, error)
 }
+{{< /highlight >}}
+ImageSource接口定义了如下方法:
+1.Reference，用于返回ImageSource对象的ImageReference
+{{< highlight go >}}
+Reference() ImageReference
+{{< /highlight >}}
+2.Close，清除ImageSource对象所关联的资源
+{{< highlight go >}}
+Close() error
+{{< /highlight >}}
+3.GetManifest，返回镜像的manifest
+{{< highlight go >}}
+GetManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, string, error)
+{{< /highlight >}}
+4.GetBlob，获取指定的blob已经blob的大小
+{{< highlight go >}}
+GetBlob(context.Context, BlobInfo, BlobInfoCache) (io.ReadCloser, int64, error)
+{{< /highlight >}}
+5.HasThreadSafeGetBlob，用于指示GetBlob是否可以并发执行
+{{< highlight go >}}
+{{< /highlight >}}
+6.GetSignatures，获取镜像的签名
+{{< highlight go >}}
+GetSignatures(ctx context.Context, instanceDigest *digest.Digest) ([][]byte, error)
+{{< /highlight >}}
+7.LayerInfosForCopy
+{{< highlight go >}}
+LayerInfosForCopy(ctx context.Context, instanceDigest *digest.Digest) ([]BlobInfo, error)
+{{< /highlight >}}
 
+# ImageDestination
+{{< highlight go "linenos=inline" >}}
 // ImageDestination is a service, possibly remote (= slow), to store components of a single image.
 //
 // There is a specific required order for some of the calls:
@@ -379,7 +503,10 @@ type ImageDestination interface {
 	// - Uploaded data MAY be removed or MAY remain around if Close() is called without Commit() (i.e. rollback is allowed but not guaranteed)
 	Commit(ctx context.Context, unparsedToplevel UnparsedImage) error
 }
+{{< /highlight >}}
 
+# ManifestTypeRejectedError
+{{< highlight go "linenos=inline" >}}
 // ManifestTypeRejectedError is returned by ImageDestination.PutManifest if the destination is in principle available,
 // refuses specifically this manifest type, but may accept a different manifest type.
 type ManifestTypeRejectedError struct { // We only use a struct to allow a type assertion, without limiting the contents of the error otherwise.
@@ -389,7 +516,10 @@ type ManifestTypeRejectedError struct { // We only use a struct to allow a type 
 func (e ManifestTypeRejectedError) Error() string {
 	return e.Err.Error()
 }
+{{< /highlight >}}
 
+# UnparsedImage
+{{< highlight go "linenos=inline" >}}
 // UnparsedImage is an Image-to-be; until it is verified and accepted, it only caries its identity and caches manifest and signature blobs.
 // Thus, an UnparsedImage can be created from an ImageSource simply by fetching blobs without interpreting them,
 // allowing cryptographic signature verification to happen first, before even fetching the manifest, or parsing anything else.
@@ -407,7 +537,10 @@ type UnparsedImage interface {
 	// Signatures is like ImageSource.GetSignatures, but the result is cached; it is OK to call this however often you need.
 	Signatures(ctx context.Context) ([][]byte, error)
 }
+{{< /highlight >}}
 
+# Image
+{{< highlight go "linenos=inline" >}}
 // Image is the primary API for inspecting properties of images.
 // An Image is based on a pair of (ImageSource, instance digest); it can represent either a manifest list or a single image instance.
 //
@@ -453,7 +586,10 @@ type Image interface {
 	// location.  If the size is not known, -1 will be returned.
 	Size() (int64, error)
 }
+{{< /highlight >}}
 
+# ImageCloser
+{{< highlight go "linenos=inline" >}}
 // ImageCloser is an Image with a Close() method which must be called by the user.
 // This is returned by ImageReference.NewImage, which transparently instantiates a types.ImageSource,
 // to ensure that the ImageSource is closed.
@@ -462,7 +598,10 @@ type ImageCloser interface {
 	// Close removes resources associated with an initialized ImageCloser.
 	Close() error
 }
+{{< /highlight >}}
 
+# ManifestUpdateOptions
+{{< highlight go "linenos=inline" >}}
 // ManifestUpdateOptions is a way to pass named optional arguments to Image.UpdatedManifest
 type ManifestUpdateOptions struct {
 	LayerInfos              []BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
@@ -471,7 +610,10 @@ type ManifestUpdateOptions struct {
 	// The values below are NOT requests to modify the image; they provide optional context which may or may not be used.
 	InformationOnly ManifestUpdateInformation
 }
+{{< /highlight >}}
 
+# ManifestUpdateInformation
+{{< highlight go "linenos=inline" >}}
 // ManifestUpdateInformation is a component of ManifestUpdateOptions, named here
 // only to make writing struct literals possible.
 type ManifestUpdateInformation struct {
@@ -479,7 +621,10 @@ type ManifestUpdateInformation struct {
 	LayerInfos   []BlobInfo       // Complete BlobInfos (size+digest) which have been uploaded, in order (the root layer first, and then successive layered layers)
 	LayerDiffIDs []digest.Digest  // Digest values for the _uncompressed_ contents of the blobs which have been uploaded, in the same order.
 }
+{{< /highlight >}}
 
+# ImageInspectInfo
+{{< highlight go "linenos=inline" >}}
 // ImageInspectInfo is a set of metadata describing Docker images, primarily their manifest and configuration.
 // The Tag field is a legacy field which is here just for the Docker v2s1 manifest. It won't be supported
 // for other manifest types.
@@ -493,14 +638,20 @@ type ImageInspectInfo struct {
 	Layers        []string
 	Env           []string
 }
+{{< /highlight >}}
 
+# DockerAuthConfig
+{{< highlight go "linenos=inline" >}}
 // DockerAuthConfig contains authorization information for connecting to a registry.
 // the value of Username and Password can be empty for accessing the registry anonymously
 type DockerAuthConfig struct {
 	Username string
 	Password string
 }
+{{< /highlight >}}
 
+# OptionalBool
+{{< highlight go "linenos=inline" >}}
 // OptionalBool is a boolean with an additional undefined value, which is meant
 // to be used in the context of user input to distinguish between a
 // user-specified value and a default value.
@@ -524,7 +675,10 @@ func NewOptionalBool(b bool) OptionalBool {
 	}
 	return o
 }
+{{< /highlight >}}
 
+# SystemContext
+{{< highlight go "linenos=inline" >}}
 // SystemContext allows parameterizing access to implicitly-accessed resources,
 // like configuration files in /etc and users' login state in their home directory.
 // Various components can share the same field only if their semantics is exactly
@@ -618,6 +772,7 @@ type SystemContext struct {
 	// CompressionLevel specifies what compression level is used
 	CompressionLevel *int
 }
+{{< /highlight >}}
 
 // ProgressEvent is the type of events a progress reader can produce
 // Warning: new event types may be added any time.
@@ -636,6 +791,8 @@ const (
 	ProgressEventDone
 )
 
+# ProgressProperties
+{{< highlight go "linenos=inline" >}}
 // ProgressProperties is used to pass information from the copy code to a monitor which
 // can use the real-time information to produce output or react to changes.
 type ProgressProperties struct {
@@ -653,3 +810,4 @@ type ProgressProperties struct {
 	// interval. Will be reset after each ProgressEventRead event.
 	OffsetUpdate uint64
 }
+{{< /highlight >}}
